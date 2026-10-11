@@ -61,13 +61,13 @@ Claude Code then lists `dratamer` among its skills. Ask Claude to "have Codex do
 ## Watcher usage
 
 ```bash
-WATCH_HOST=<host>:<port> WATCH_COOLDOWN=30 \
+WATCH_PID=<codex pid> WATCH_HOST=<host>:<port> WATCH_COOLDOWN=30 \
   bash ~/.claude/skills/dratamer/scripts/codex_watch.sh <codex-log> [idle-seconds]
 ```
 
 - `WATCH_HOST` is optional. Set it when Codex works on a remote machine, so losing that machine raises `HOST_DOWN`.
 - `WATCH_PROBE_URL` overrides the backend reachability probe (default `https://chatgpt.com/`).
-- The watcher treats any running `codex exec` process as alive, so supervise one Codex run at a time.
+- `WATCH_PID` tracks the Codex process you launched. Without it, any running `codex exec` (including other sessions' runs) counts as alive.
 
 `scripts/codex_digest.py <codex-log>` prints the log content added since its previous call: agent messages in full, commands truncated.
 

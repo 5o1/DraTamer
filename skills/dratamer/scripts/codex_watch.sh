@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Usage: [WATCH_HOST=host:port] [WATCH_COOLDOWN=30] codex_watch.sh <codex-log> [idle-seconds, default 900]
+# Usage: [WATCH_PID=<codex pid>] [WATCH_HOST=host:port] [WATCH_COOLDOWN=30] codex_watch.sh <codex-log> [idle-seconds, default 900]
+# WATCH_PID tracks one Codex process; without it any running `codex exec` counts as alive.
 # Run under the Monitor tool. Each stdout line is one event.
 # Normal events (never throttled):
 #   CODEX_MSG: <first lines of each Codex agent message>
@@ -67,12 +68,13 @@ tail -n 0 -F "$log" 2>/dev/null | awk -v stamp="$stamp" -v cfile="$state/compact
   case "$line" in ALERT\ *) alert "${line#ALERT }" ;; *) echo "$line" ;; esac
 done &
 reader=$!
+codex_alive() { if [[ -n "${WATCH_PID:-}" ]]; then kill -0 "$WATCH_PID" 2>/dev/null; else pgrep -f "^codex exec" >/dev/null; fi; }
 net_up() { curl -s -o /dev/null --max-time 10 "$probe_url"; }
 host_up() { timeout 5 bash -c "</dev/tcp/${WATCH_HOST%:*}/${WATCH_HOST##*:}" 2>/dev/null; }
 net_state=up; host_state=up; tick=0
 # Give a just-launched Codex a moment to appear in the process table.
-for _ in 1 2 3 4 5 6; do pgrep -f "^codex exec" >/dev/null && break; sleep 5; done
-while pgrep -f "^codex exec" >/dev/null; do
+for _ in 1 2 3 4 5 6; do codex_alive && break; sleep 5; done
+while codex_alive; do
   sleep 10
   tick=$((tick + 1))
   if (( tick % 6 == 0 )); then

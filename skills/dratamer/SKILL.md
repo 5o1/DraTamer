@@ -65,7 +65,7 @@ After launch, confirm the header shows the right `model:`, `reasoning effort:` a
 Start the Monitor tool with `timeout_ms: 1800000` and re-arm it when it expires:
 
 ```bash
-WATCH_HOST=<gpu-host>:<ssh-port> bash ~/.claude/skills/dratamer/scripts/codex_watch.sh $S/codex_<topic>.log 900
+WATCH_PID=<codex pid> WATCH_HOST=<gpu-host>:<ssh-port> bash ~/.claude/skills/dratamer/scripts/codex_watch.sh $S/codex_<topic>.log 900
 ```
 
 Events:
@@ -82,7 +82,7 @@ Events:
   - Alerts share a cooldown (`WATCH_COOLDOWN`, default 30 s, set by the owner): at most one alert wakes you per cooldown. Alerts inside it are counted and reported once as `ALERT_SUPPRESSED: N ..., last: ...`, and any left at exit are reported before `CODEX_EXITED`. `CODEX_MSG` (including the compaction marker), `CODEX_IDLE` and `CODEX_EXITED` are never throttled.
 - Add a new pattern to the script when a new failure signature shows up, rather than shortening the idle interval.
 
-The watcher treats any running `codex exec` process as alive, so supervise one Codex run at a time. Run only one monitor per log. Stop the old one with TaskStop before starting a new one, or you get duplicate events. To read the full new log content since your last check, run `python3 ~/.claude/skills/dratamer/scripts/codex_digest.py $S/codex_<topic>.log`. It tracks a byte offset, prints agent messages in full and truncates commands.
+Other sessions may run their own Codex on the same machine. Always pass `WATCH_PID` (the PID of the `codex exec` you launched; get it with `$!` or `pgrep -f "codex exec resume <SESSION_ID>"`); without it the watcher treats any `codex exec` as alive. Run only one monitor per log. Stop the old one with TaskStop before starting a new one, or you get duplicate events. To read the full new log content since your last check, run `python3 ~/.claude/skills/dratamer/scripts/codex_digest.py $S/codex_<topic>.log`. It tracks a byte offset, prints agent messages in full and truncates commands.
 
 On each event, check for these failure patterns:
 - **Lazy:**
@@ -105,7 +105,7 @@ Routine progress gets one short line to the user. Don't send a push notification
 
 ## 4. Intervene
 
-1. **Stop Codex:** `pkill -f "^codex exec"`. The `^` anchor matters. An unanchored pattern also matches your own shell and kills it (exit 144).
+1. **Stop Codex:** `kill <pid>` for the run you launched, or `pkill -f "^codex exec resume <SESSION_ID>"`. Never use a bare `pkill -f "^codex exec"`: other sessions may run their own Codex. The `^` anchor matters; an unanchored pattern also matches your own shell and kills it (exit 144).
 2. **Write a ruling** to `$S/<topic>_fix_N.md`:
    - Name the root cause. If it was your own task design, say so; that is usually the case.
    - Give the corrected method or gate, and restate what is unchanged.
