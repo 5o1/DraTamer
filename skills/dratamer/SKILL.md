@@ -70,6 +70,7 @@ WATCH_HOST=<gpu-host>:<ssh-port> bash ~/.claude/skills/dratamer/scripts/codex_wa
 
 Events:
 - `CODEX_MSG: ...`: the first lines of each Codex agent message.
+- `CODEX_MSG [after context compaction]: ...`: Codex compacted its context (the log line `context compacted`) before this message. The compaction is not a separate event: it rides on the next message, unthrottled. If Codex exits before writing another message, a `CODEX_COMPACTED` line precedes `CODEX_EXITED`. Codex usually restates its plan right after compacting, so that message is not a turn-end summary. It is also when Codex is most likely to drop constraints or drift off the main line. Read its next few messages closely against the brief and any pending ruling, and check `git status` for out-of-scope edits. If anything was lost, stop it and resume with a short ruling that restates the missing constraints.
 - `CODEX_IDLE: ...`: no event for 15 minutes (the owner's chosen interval; long report writes and simulations are often silent for over 10 minutes). It includes the log age and the last shell command, which tells you whether Codex is still computing, stuck or drifting.
 - `CODEX_EXITED`: Codex is done.
 - Failure-specific alerts, one hook per known failure, so real failures do not wait for the idle check:
@@ -78,7 +79,7 @@ Events:
   - `REMOTE_SSH_FAIL`: an ssh connect or key-auth failure in command output.
   - `NET_DOWN` / `NET_UP`: the Codex backend became unreachable / reachable (probe every 60 s).
   - `HOST_DOWN` / `HOST_UP`: `WATCH_HOST` (TCP host:port) became unreachable / reachable; omit `WATCH_HOST` for local-only tasks.
-  - Alerts share a cooldown (`WATCH_COOLDOWN`, default 30 s, set by the owner): at most one alert wakes you per cooldown. Alerts inside it are counted and reported once as `ALERT_SUPPRESSED: N ..., last: ...`, and any left at exit are reported before `CODEX_EXITED`. `CODEX_MSG`, `CODEX_IDLE` and `CODEX_EXITED` are never throttled.
+  - Alerts share a cooldown (`WATCH_COOLDOWN`, default 30 s, set by the owner): at most one alert wakes you per cooldown. Alerts inside it are counted and reported once as `ALERT_SUPPRESSED: N ..., last: ...`, and any left at exit are reported before `CODEX_EXITED`. `CODEX_MSG` (including the compaction marker), `CODEX_IDLE` and `CODEX_EXITED` are never throttled.
 - Add a new pattern to the script when a new failure signature shows up, rather than shortening the idle interval.
 
 The watcher treats any running `codex exec` process as alive, so supervise one Codex run at a time. Run only one monitor per log. Stop the old one with TaskStop before starting a new one, or you get duplicate events. To read the full new log content since your last check, run `python3 ~/.claude/skills/dratamer/scripts/codex_digest.py $S/codex_<topic>.log`. It tracks a byte offset, prints agent messages in full and truncates commands.

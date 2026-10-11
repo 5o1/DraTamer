@@ -29,6 +29,7 @@ Watching it turn by turn is expensive, though. DraTamer keeps the human out of t
    | Event | Meaning | Throttled |
    |---|---|---|
    | `CODEX_MSG` | Codex wrote an agent message | no |
+   | `CODEX_MSG [after context compaction]` | the first message after Codex compacted its context; re-check it against the brief | no |
    | `CODEX_IDLE` | nothing happened for the idle interval (default 15 min) | no |
    | `CODEX_EXITED` | the Codex process is gone | no |
    | `CODEX_NET_RETRY` / `CODEX_NET_FAIL` | Codex is reconnecting to its API / gave up | yes |

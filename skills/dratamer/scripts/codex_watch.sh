@@ -3,6 +3,8 @@
 # Run under the Monitor tool. Each stdout line is one event.
 # Normal events (never throttled):
 #   CODEX_MSG: <first lines of each Codex agent message>
+#   CODEX_MSG [after context compaction]: the first message after Codex compacted its context
+#     (not a separate event; if Codex exits first, a CODEX_COMPACTED line precedes CODEX_EXITED)
 #   CODEX_IDLE: <no event for idle-seconds; log age; last shell command>
 #   CODEX_EXITED  (when no `codex exec` process remains; the watch then ends)
 # Failure-specific alerts (fire at once, but at most one per WATCH_COOLDOWN seconds;
@@ -47,18 +49,20 @@ flush_suppressed() {  # pass "force" to flush regardless of the cooldown (used a
   ) 9>"$state/lock"
 }
 
-tail -n 0 -F "$log" 2>/dev/null | awk -v stamp="$stamp" '
+tail -n 0 -F "$log" 2>/dev/null | awk -v stamp="$stamp" -v cfile="$state/compacted" '
   function emit(s) { print s; fflush(); system("touch " stamp) }
+  function msg(s) { if (compacted) { s = "CODEX_MSG [after context compaction]: " s; compacted = 0; system("rm -f " cfile) } else s = "CODEX_MSG: " s; emit(s) }
   function alert(s) { print "ALERT " s; fflush() }
   /^ERROR: Reconnecting\.\.\. 5\/5/ { alert("CODEX_NET_FAIL: " substr($0, 1, 200)); next }
   /^ERROR: Reconnecting/ { alert("CODEX_NET_RETRY: " substr($0, 1, 200)); next }
   /failed to refresh available models/ { next }  # known harmless (see SKILL.md)
   /^ERROR: / || /Falling back from WebSockets/ || /^[0-9TZ:.-]+ +ERROR codex/ { alert("CODEX_ERROR: " substr($0, 1, 200)); next }
+  $0 == "context compacted" { compacted = 1; system("touch " cfile); next }
   /^ssh: connect to host/ || /Permission denied \(publickey/ || /^kex_exchange_identification/ { alert("REMOTE_SSH_FAIL: " substr($0, 1, 200)); next }
   $0 == "codex" { grab = 3; buf = ""; next }
   grab > 0 && $0 != "" { buf = buf (buf == "" ? "" : " / ") substr($0, 1, 220); grab--;
-    if (grab == 0 || $0 ~ /^(exec|apply patch|hook:)/) { emit("CODEX_MSG: " buf); grab = 0 } next }
-  grab > 0 && $0 == "" && buf != "" { emit("CODEX_MSG: " buf); grab = 0 }
+    if (grab == 0 || $0 ~ /^(exec|apply patch|hook:)/) { msg(buf); grab = 0 } next }
+  grab > 0 && $0 == "" && buf != "" { msg(buf); grab = 0 }
 ' | while IFS= read -r line; do
   case "$line" in ALERT\ *) alert "${line#ALERT }" ;; *) echo "$line" ;; esac
 done &
@@ -96,6 +100,7 @@ while pgrep -f "^codex exec" >/dev/null; do
 done
 sleep 2
 flush_suppressed force
+[[ -e "$state/compacted" ]] && echo "CODEX_COMPACTED: Codex compacted its context and exited before writing another message"
 echo "CODEX_EXITED"
 kill "$reader" 2>/dev/null
 pkill -P $$ 2>/dev/null
