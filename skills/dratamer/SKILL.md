@@ -1,6 +1,6 @@
 ---
 name: dratamer
-description: Hand an execution task to OpenAI Codex CLI running in the background and supervise it. Claude researches the problem and writes the task; Codex only executes. Claude watches Codex's log with an event-driven monitor (each agent message, failure-specific alerts with a 30 s cooldown, a 15-minute idle check, process exit) and steps in by stopping Codex and resuming it with a written ruling. Use when the user asks to have Codex do the work, to "control/supervise codex", or to run a task through Codex in the background.
+description: Hand an execution task to OpenAI Codex CLI running in the background and supervise it. Claude designs the work and writes the task; Codex does the execution and, when delegated, the research. Claude watches Codex's log with an event-driven monitor (each agent message, failure-specific alerts with a 30 s cooldown, a 15-minute idle check, process exit) and steps in by stopping Codex and resuming it with a written ruling. Use when the user asks to have Codex do the work, to "control/supervise codex", or to run a task through Codex in the background.
 ---
 
 # Supervised Codex execution
