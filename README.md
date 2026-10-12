@@ -32,13 +32,13 @@ Watching it turn by turn is expensive, though. DraTamer keeps the human out of t
    | `CODEX_MSG [after context compaction]` | the first message after Codex compacted its context; re-check it against the brief | no |
    | `CODEX_IDLE` | nothing happened for the idle interval (default 15 min) | no |
    | `CODEX_EXITED` | the Codex process is gone | no |
-   | `CODEX_NET_RETRY` / `CODEX_NET_FAIL` | Codex is reconnecting to its API / gave up | yes |
-   | `CODEX_ERROR` | another Codex CLI error | yes |
+   | `CODEX_ERROR` | a Codex CLI error other than a network error | yes |
+   | `NET_PROBLEM` / `NET_RECOVERED` | network trouble outlasted the tolerance period / ended | yes |
    | `REMOTE_SSH_FAIL` | an ssh connect or key-auth failure in command output | yes |
-   | `NET_DOWN` / `NET_UP` | the Codex backend became unreachable / reachable | yes |
-   | `HOST_DOWN` / `HOST_UP` | `WATCH_HOST` became unreachable / reachable | yes |
 
    Each known failure has its own hook, so a real failure does not wait for the idle check. Throttled alerts share a cooldown (`WATCH_COOLDOWN`, default 30 s): at most one wakes Claude per cooldown. The rest are summarised in a single `ALERT_SUPPRESSED` line.
+
+   Brief network trouble needs no action, because Codex reconnects on its own. API reconnects, websocket/TLS errors and an unreachable backend open a silent tolerance period that closes as soon as the backend answers again. Only trouble lasting longer than `WATCH_OUTAGE` seconds (default 300) wakes Claude.
 4. **Intervene.** Claude stops Codex, writes a ruling (root cause, corrected method, what stays unchanged), and resumes the same Codex session.
 5. **Review.** Claude reads the report, spot-checks the key numbers and citations, checks `git status`, and reports to the user.
 
@@ -61,11 +61,10 @@ Claude Code then lists `dratamer` among its skills. Ask Claude to "have Codex do
 ## Watcher usage
 
 ```bash
-WATCH_PID=<codex pid> WATCH_HOST=<host>:<port> WATCH_COOLDOWN=30 \
+WATCH_PID=<codex pid> WATCH_COOLDOWN=30 WATCH_OUTAGE=300 \
   bash ~/.claude/skills/dratamer/scripts/codex_watch.sh <codex-log> [idle-seconds]
 ```
 
-- `WATCH_HOST` is optional. Set it when Codex works on a remote machine, so losing that machine raises `HOST_DOWN`.
 - `WATCH_PROBE_URL` overrides the backend reachability probe (default `https://chatgpt.com/`).
 - `WATCH_PID` tracks the Codex process you launched. Without it, any running `codex exec` (including other sessions' runs) counts as alive.
 

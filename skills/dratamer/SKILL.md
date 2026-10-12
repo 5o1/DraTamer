@@ -1,15 +1,15 @@
 ---
 name: dratamer
-description: Hand an execution task to OpenAI Codex CLI running in the background and supervise it. Claude designs the work and writes the task; Codex does the execution and, when delegated, the research. Claude watches Codex's log with an event-driven monitor (each agent message, failure-specific alerts with a 30 s cooldown, a 15-minute idle check, process exit) and steps in by stopping Codex and resuming it with a written ruling. Use when the user asks to have Codex do the work, to "control/supervise codex", or to run a task through Codex in the background.
+description: Hand an execution task to OpenAI Codex CLI running in the background and supervise it. Claude designs the work and writes the task; Codex does the execution and, when delegated, the research. Claude watches Codex's log with an event-driven monitor (each agent message, failure-specific alerts with a cooldown, a silent tolerance period for network trouble, an idle check, process exit) and steps in by stopping Codex and resuming it with a written ruling. Use when the user asks to have Codex do the work, to "control/supervise codex", or to run a task through Codex in the background.
 ---
 
 # Supervised Codex execution
 
-The user does not trust Codex unattended. Left alone, it tends to:
+Left unattended, Codex tends to:
 - simplify the task (hardcoding values, skipping checks, swapping in weaker methods);
 - drift off scope (extra tooling, starting later phases, editing protected files).
 
-The user also wants **few back-and-forth rounds**. This workflow serves both goals.
+Supervising it turn by turn, on the other hand, costs many back-and-forth rounds. This workflow keeps Codex on track with few rounds.
 
 ## Roles
 
@@ -35,11 +35,11 @@ Put it in the session scratchpad, e.g. `$S/codex_<topic>_task.md`, and write it 
 - **Limit diagnostics on failure.** When a critical gate fails, render at most 3 relevant diagnostic images, then stop. Produce the full figure set only on success, because full renders after a failure waste a lot of time.
 - **Constraints:** output directory, protected paths, no git commit, no hardware IO, network rules. Keep large files on the remote node if the project says so.
 - **Deliverables:** a report with an "unauthorized choices I made" section, plus a reproducible script.
-- **End with paths.** The last message must list absolute paths of all images and key files, because the user reads results in a terminal CLI.
+- **End with paths.** The last message must list absolute paths of all images and key files, so they can be opened directly.
 
 ## 2. Launch
 
-Pick the model with the user. Check project memory for their current choice, e.g. `-m gpt-6.1-sol -c model_reasoning_effort="high"`. Never edit `~/.codex/config.toml`; other projects use it. Run with `run_in_background: true`:
+Agree on the model and reasoning effort with the user, and pass them on the command line. Never edit `~/.codex/config.toml`; other projects use it. Run with `run_in_background: true`:
 
 ```bash
 # Fresh session (use a new one when old context would pollute the task)
@@ -65,21 +65,23 @@ After launch, confirm the header shows the right `model:`, `reasoning effort:` a
 Start the Monitor tool with `timeout_ms: 1800000` and re-arm it when it expires:
 
 ```bash
-WATCH_PID=<codex pid> WATCH_HOST=<gpu-host>:<ssh-port> bash ~/.claude/skills/dratamer/scripts/codex_watch.sh $S/codex_<topic>.log 900
+WATCH_PID=<codex pid> bash ~/.claude/skills/dratamer/scripts/codex_watch.sh $S/codex_<topic>.log 900
 ```
 
 Events:
 - `CODEX_MSG: ...`: the first lines of each Codex agent message.
 - `CODEX_MSG [after context compaction]: ...`: Codex compacted its context (the log line `context compacted`) before this message. The compaction is not a separate event: it rides on the next message, unthrottled. If Codex exits before writing another message, a `CODEX_COMPACTED` line precedes `CODEX_EXITED`. Codex usually restates its plan right after compacting, so that message is not a turn-end summary. It is also when Codex is most likely to drop constraints or drift off the main line. Read its next few messages closely against the brief and any pending ruling, and check `git status` for out-of-scope edits. If anything was lost, stop it and resume with a short ruling that restates the missing constraints.
-- `CODEX_IDLE: ...`: no event for 15 minutes (the owner's chosen interval; long report writes and simulations are often silent for over 10 minutes). It includes the log age and the last shell command, which tells you whether Codex is still computing, stuck or drifting.
+- `CODEX_IDLE: ...`: no event for the idle interval (the second argument; 900 s works well because long report writes and simulations are often silent for over 10 minutes). It includes the log age and the last shell command, which tells you whether Codex is still computing, stuck or drifting.
 - `CODEX_EXITED`: Codex is done.
 - Failure-specific alerts, one hook per known failure, so real failures do not wait for the idle check:
-  - `CODEX_NET_RETRY` / `CODEX_NET_FAIL`: Codex API reconnecting / attempts exhausted.
-  - `CODEX_ERROR`: other Codex CLI errors, including the WebSocket-to-HTTPS fallback.
+  - `CODEX_ERROR`: Codex CLI errors other than network errors.
   - `REMOTE_SSH_FAIL`: an ssh connect or key-auth failure in command output.
-  - `NET_DOWN` / `NET_UP`: the Codex backend became unreachable / reachable (probe every 60 s).
-  - `HOST_DOWN` / `HOST_UP`: `WATCH_HOST` (TCP host:port) became unreachable / reachable; omit `WATCH_HOST` for local-only tasks.
-  - Alerts share a cooldown (`WATCH_COOLDOWN`, default 30 s, set by the owner): at most one alert wakes you per cooldown. Alerts inside it are counted and reported once as `ALERT_SUPPRESSED: N ..., last: ...`, and any left at exit are reported before `CODEX_EXITED`. `CODEX_MSG` (including the compaction marker), `CODEX_IDLE` and `CODEX_EXITED` are never throttled.
+  - `NET_PROBLEM` / `NET_RECOVERED`: network trouble that outlasted the tolerance period / its end.
+  - Alerts share a cooldown (`WATCH_COOLDOWN`, default 30 s): at most one alert wakes you per cooldown. Alerts inside it are counted and reported once as `ALERT_SUPPRESSED: N ..., last: ...`, and any left at exit are reported before `CODEX_EXITED`. `CODEX_MSG` (including the compaction marker), `CODEX_IDLE` and `CODEX_EXITED` are never throttled.
+- **Network tolerance period.** Brief network trouble needs no action, because Codex reconnects on its own. API reconnects, websocket/TLS/transport errors and an unreachable Codex backend open a silent tolerance period, during which the backend is probed every 10 s.
+  - As soon as a probe succeeds, the period closes and nothing is reported.
+  - A period still open after `WATCH_OUTAGE` seconds (default 300) raises one `NET_PROBLEM`. When the backend is reachable again, `NET_RECOVERED` follows.
+  - A new interruption after a recovery opens a new period. Only one period is open at a time.
 - Add a new pattern to the script when a new failure signature shows up, rather than shortening the idle interval.
 
 Other sessions may run their own Codex on the same machine. Always pass `WATCH_PID` (the PID of the `codex exec` you launched; get it with `$!` or `pgrep -f "codex exec resume <SESSION_ID>"`); without it the watcher treats any `codex exec` as alive. Run only one monitor per log. Stop the old one with TaskStop before starting a new one, or you get duplicate events. To read the full new log content since your last check, run `python3 ~/.claude/skills/dratamer/scripts/codex_digest.py $S/codex_<topic>.log`. It tracks a byte offset, prints agent messages in full and truncates commands.
@@ -116,19 +118,68 @@ Routine progress gets one short line to the user. Don't send a push notification
 
 **When Codex asks a question** (a `CODEX_MSG` ending with options and no further progress), welcome it. Two-way discussion between agents is the intended workflow, so don't forbid questions in task files. `codex exec` cannot read stdin mid-run, though, so the asking process just waits. Answer promptly: stop it, write the answer with your reasoning, then resume the same session. If the decision belongs to the user, ask the user first.
 
+### Side questions and discussion (btw)
+
+Codex's interactive `/btw` (side conversation) forks the thread so a question doesn't pollute the main line. The non-interactive equivalent is `codex exec fork`, verified with Codex 0.163:
+
+```bash
+# Ask a forked copy of the session; the main thread is untouched. Like resume, fork rejects -s.
+codex exec fork <SESSION_ID> -m <MODEL> -c model_reasoning_effort=\"low\" \
+  -c sandbox_mode=\"read-only\" --ephemeral -o $S/btw_<topic>.md \
+  "这是一个旁支提问，不要修改文件。<question>"
+```
+
+- **Asking while Codex works.** Fork whenever you need Codex's reasoning: why it chose X, what it tried and dropped, what it is unsure of. This works while the main run continues. The fork sees only the context saved so far, so the answer may lag the live run.
+- **Discussion.** Before a ruling, you can fork to talk a design question through: give your proposal and ask for objections and missing facts. Several forks can go back and forth. Put the agreed conclusion into the ruling file; forks are discarded.
+- **Taking over a session.** Instead of reading the whole log, fork and ask for a handoff with four parts:
+  - current state;
+  - decisions made and why;
+  - open issues;
+  - claims Codex itself has not verified.
+  Then spot-check the key facts against primary artifacts before acting on them.
+- **Verifying what Codex says.** Its answers explain things but are not evidence. Check numbers, file changes and test results against logs and files. Codex drifts, especially after compaction, and its self-report inherits the drift.
+- **Use read-only and `--ephemeral`.** A side question must never edit files or launch runs. Pass `--ephemeral` so the fork isn't saved as a session; drop it only when you want to keep a fork, for example a handoff you will resume.
+- **Watching a fork.** Get the PID with `pgrep -f "^codex exec fork <SID>"`. An unanchored pattern also matches your own wrapper shells, which exit quickly and make the watcher report `CODEX_EXITED` too early. Forking a session whose last tool call was still open logs many `Orphan custom tool call output` errors; they are harmless.
+- **Guard in read-only forks.** Under the Stop That Shit Guard, a read-only fork runs in review mode. Shell commands that aren't provably read-only are blocked, quoted `ssh` commands included. Check remote state yourself and give Codex the result, rather than expecting the fork to fetch it.
+- **Remote files for read-only forks.** Before forking, mount the remote run directory read-only on the local machine, so that Codex reads it with plain `cat`/`grep`/`ls`, which the Guard can prove read-only:
+
+  ```bash
+  sshfs -o ro,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,attr_timeout=5,entry_timeout=5,BatchMode=yes \
+    <host>:<remote_dir> /tmp/<host>-ro
+  ```
+
+  Tested: reads work, and writes fail with "Read-only file system". Limitations:
+  - Remote `/proc` reads come back empty over SFTP.
+  - `nvidia-smi` cannot be reached this way.
+
+  For process and GPU state, use a status file that the experiment writes, or check it yourself over ssh. A dropped network can hang reads on the mount, so wrap them in `timeout`. Unmount with `fusermount -u`.
+- **`codex queue --thread <SID> --message <TEXT>` does not steer a running `codex exec`.** Tested: the running turn never saw the message. The message is delivered on the next `resume`. Use it to leave a note for the next turn. To change course mid-run, still stop the run and resume it with a ruling.
+
 **When Codex stops on a gate:**
 - First decide whether the cause is the task definition, which is your fault, or a real finding.
 - If you can fix the task definition within the scope the user already approved, write the ruling and resume, then report afterwards.
 - If the fix changes something the user decided, ask the user first.
 
-## Review-only tasks (Stop That Shit plugin)
+## Sub-agents
 
-The user's Codex has the Stop That Shit Guard. In `review` mode it blocks every file write (`MODE_FORBIDS_MUTATION`) and every shell command it cannot prove read-only (`MUTABILITY_UNPROVEN`), including the report file and test runs. The user approved whitelisting the report file:
+Codex can spawn sub-agents, which speeds up work that splits into independent parts, such as separate comparison runs or repeated measurements. When a task has such parts, allow sub-agents, and say in the brief:
+- which parts may run in parallel;
+- which output paths each sub-agent owns. Leave edits to shared code to the main agent.
+
+Keep the task to the main agent when every step edits the same code.
+
+The watcher follows the main agent. Its messages and its final report carry the sub-agents' results, and idle alerts while it waits on sub-agents are expected. Each sub-agent writes its own session file under `~/.codex/sessions/`, which you can read when you need detail.
+
+## With the Stop That Shit plugin
+
+If the Codex installation uses the Stop That Shit Guard, every task file starts with a directive line that sets the mode, the files it may touch, the dependency policy and the sub-agent budget.
+
+**Review-only tasks.** In `review` mode the Guard blocks every file write (`MODE_FORBIDS_MUTATION`) and every shell command it cannot prove read-only (`MUTABILITY_UNPROVEN`), including the report file and test runs. To let Codex write its report, whitelist that one file:
 
 - Put this directive on the **first line** of a review task file, outside quotes and code blocks:
 
   ```text
-  $stop-that-shit lock change files=build/experiments/<topic>_review/REVIEW.md -- Review only; write the report to this one file.
+  $stop-that-shit lock change files=<relative/path/to/REVIEW.md> -- Review only; write the report to this one file.
   ```
 
   Use the exact relative path. Separate several paths with `|`. Don't use globs.
@@ -136,13 +187,14 @@ The user's Codex has the Stop That Shit Guard. In `review` mode it blocks every 
 - Under a narrow `files=` lock, shell commands that can't be proven read-only still need approval, which `codex exec` cannot grant. Expect test runs to be blocked. Run the regression yourself and give Codex the results, marked "reviewer-verified".
 - If the report still can't be written, take the findings from `$S/codex_<topic>_last.md`.
 
-For execution tasks under the same Guard, set the fields the task needs on the directive line. The Guard defaults to `deps=ask` and blocks any `pip install` with `DEPENDENCY_NOT_AUTHORIZED`:
+**Execution tasks.** Set the fields the task needs on the directive line:
 
 ```text
-$stop-that-shit change agents=0 deps=allow -- <task>
+$stop-that-shit change agents=<N> deps=allow -- <task>
 ```
 
-Use `deps=allow` only when the task actually installs packages, and state in the body which environments it may install into.
+- `agents=N` is the sub-agent budget; use `agents=0` to keep the task to the main agent.
+- The Guard defaults to `deps=ask` and blocks any `pip install` with `DEPENDENCY_NOT_AUTHORIZED`. Use `deps=allow` only when the task actually installs packages, and state in the body which environments it may install into.
 
 ## 5. Review on exit
 
