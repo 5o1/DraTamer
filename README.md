@@ -43,6 +43,8 @@ Watching it turn by turn is expensive, though. DraTamer keeps the human out of t
 4. **Intervene.** For a change inside the session's own scope, Claude stops Codex, writes a ruling (root cause, corrected method, what stays unchanged), and resumes the same Codex session. Separate new work goes to a parallel session.
 5. **Accept.** Claude, as the lead, verifies the result itself before reporting or shipping. It looks at the UI, images or files the way the user will, recomputes key numbers, runs the tests, and checks every default Codex chose against the user's words. A requirement ledger records each request with Claude's own evidence. The report to the user separates what Claude verified from what it has only Codex's word for. Routine Codex messages are for steering and are not relayed as progress.
 
+Claude and Codex talk to each other in American English: task files, rulings, questions and Codex's reports. Claude still talks to the user in the user's language.
+
 The full procedure is in [`skills/dratamer/SKILL.md`](skills/dratamer/SKILL.md).
 
 ## Install

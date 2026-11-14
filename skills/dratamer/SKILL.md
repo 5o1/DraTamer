@@ -37,6 +37,16 @@ These failure modes come from real sessions; avoid each one:
 
 **Requirement ledger.** Keep `$S/requirements.md`: one row per user request, with the user's verbatim words, the acceptance criteria you derived, the owning task, and the evidence **you** collected (screenshot path, recomputed number, command output). Add rows when the user adds or corrects a request. A row without your own evidence is not done, whatever Codex reports.
 
+## Language with Codex
+
+Use **American English** as the standard language for everything exchanged with Codex:
+- task files, rulings, research briefs, fork questions and resume messages;
+- Codex's own messages and reports: ask for American English in every task file.
+
+When a task quotes the user, keep the user's words verbatim in their original language, and add an American English rendering marked as yours. The requirement ledger follows the same rule.
+
+This applies only to the Claude–Codex channel. Talk to the user in the user's language, and translate Codex's findings when you report them.
+
 ## Decouple the work, then run Codex sessions in parallel
 
 Before writing any task, split the work by **write set**: the files, modules, output directories and runtime resources each part will change.
@@ -71,7 +81,7 @@ Prefer splitting whenever it is possible; parallel sessions finish sooner, and a
 
 ## 1. Write the task file
 
-Put it in the session scratchpad, e.g. `$S/codex_<topic>_task.md`, and write it in the user's language. Include:
+Put it in the session scratchpad, e.g. `$S/codex_<topic>_task.md`, and write it in American English (see "Language with Codex"). Include:
 
 - **Context and facts already verified.** Mark them "reviewer-verified; reproduce in report". Codex must recheck them; it has caught reviewer errors before.
 - **The method, stated precisely,** with simple, robust definitions. Don't ask Codex to invent segmentations or heuristics.
@@ -179,7 +189,7 @@ Codex's interactive `/btw` (side conversation) forks the thread so a question do
 # Ask a forked copy of the session; the main thread is untouched. Like resume, fork rejects -s.
 codex exec fork <SESSION_ID> -m <MODEL> -c model_reasoning_effort=\"low\" \
   -c sandbox_mode=\"read-only\" --ephemeral -o $S/btw_<topic>.md \
-  "这是一个旁支提问，不要修改文件。<question>"
+  "This is a side question. Do not modify any files. <question>"
 ```
 
 - **Asking while Codex works.** Fork whenever you need Codex's reasoning: why it chose X, what it tried and dropped, what it is unsure of. This works while the main run continues. The fork sees only the context saved so far, so the answer may lag the live run.
