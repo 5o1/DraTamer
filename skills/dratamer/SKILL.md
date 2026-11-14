@@ -177,6 +177,8 @@ Use the waiting time: while Codex works, prepare the acceptance checks you will 
    - Tell Codex to record the ruling in its report.
    - Merge everything pending into one ruling, so one resume covers it all.
 3. **Resume** in the background with the `resume` command above, then re-arm the monitor.
+   - Resume only after the monitor reports `CODEX_EXITED` for the run you stopped or that ended its turn. If you resume while it still runs, two processes write to the same session.
+   - Don't wait for the exit with a foreground loop such as `until ! pgrep ...; do sleep 3; done`. It blocks your session, adds nothing the watcher doesn't already report, and the user has to background it by hand. Wait for the `CODEX_EXITED` event instead, then run the resume command.
 4. **Tell the user** what you changed and why.
 
 **When Codex asks a question** (a `CODEX_MSG` ending with options and no further progress), welcome it. Two-way discussion between agents is the intended workflow, so don't forbid questions in task files. `codex exec` cannot read stdin mid-run, though, so the asking process just waits. Answer promptly: stop it, write the answer with your reasoning, then resume the same session. If the decision belongs to the user, ask the user first.
