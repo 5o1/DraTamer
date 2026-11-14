@@ -1,6 +1,6 @@
 ---
 name: dratamer
-description: Hand an execution task to OpenAI Codex CLI running in the background and supervise it. Claude designs the work and writes the task; Codex does the execution and, when delegated, the research. Claude watches Codex's log with an event-driven monitor (each agent message, failure-specific alerts with a cooldown, a silent tolerance period for network trouble, an idle check, process exit) and steps in by stopping Codex and resuming it with a written ruling. Use when the user asks to have Codex do the work, to "control/supervise codex", or to run a task through Codex in the background.
+description: Hand execution tasks to OpenAI Codex CLI running in the background and lead them. Claude owns the outcome: it designs the work, verifies results itself before reporting or shipping, and treats Codex's reports as claims. It splits the work into decoupled parts with disjoint write sets, and runs independent parts as parallel Codex sessions; Codex does the execution and, when delegated, the research. Claude watches Codex's log with an event-driven monitor (each agent message, failure-specific alerts with a cooldown, a silent tolerance period for network trouble, an idle check, process exit) and steps in by stopping Codex and resuming it with a written ruling. Use when the user asks to have Codex do the work, to "control/supervise codex", or to run a task through Codex in the background.
 ---
 
 # Supervised Codex execution
@@ -13,12 +13,61 @@ Supervising it turn by turn, on the other hand, costs many back-and-forth rounds
 
 ## Roles
 
-- **You (Claude):**
-  - design: method choices, gates, root-cause analysis;
+- **You (Claude) are the lead and own the outcome.** The user holds you accountable for what Codex produces, not Codex. Codex's messages and reports are **claims**; they become facts only after you check them against the artifact itself. Your job:
+  - design: method choices, gates, root-cause analysis, and every user-facing default (see "Defaults are decisions" below);
   - write the task, research briefs and rulings;
-  - review the results: read conclusions and open questions, spot-check key numbers and about three key citations against primary sources.
+  - **verify before you report or ship** (section 5): look at what the user will see, run what the user will run, and recompute a sample of the key numbers yourself;
+  - keep the requirement ledger: the user's words, their acceptance criteria, and your own evidence for each.
 - **Codex:** implementation, runs, renders, reports, and also literature and tool research. Research is delegated because it is cheaper in Codex than in your long-context turns. Give research briefs neutral questions, primary-source rules and a single report file.
 - **Before dispatching:** settle every design decision you can. Confirm with the user the ones that are theirs to make. Write the conclusions into the task, so Codex has nothing to invent.
+
+### Lead, don't relay
+
+These failure modes come from real sessions; avoid each one:
+
+| Failure | What it looks like | Do instead |
+|---|---|---|
+| **Relaying** | Each `CODEX_MSG` is paraphrased to the user as progress, and the final report is retold as the result | Stay silent on routine progress. Speak to the user when there is a decision for them, a problem, or a result **you checked**. |
+| **"Done" on Codex's word** | Telling the user a feature works, or deploying it, because Codex said its tests passed | Open the UI, the images or the files yourself, the way the user will see them, before saying "done" or deploying. |
+| **Hidden defaults** | Codex picked a default (panes off, a far camera, a layout) that silently defeats the request | Treat defaults as decisions. Make Codex list every default and choice it made, and check each against the user's words. |
+| **Ruling conflicts** | Your own ruling ("show native pixels, don't shrink") breaks another requirement ("fit on one screen") | Before sending a ruling, re-read the requirement ledger and check that it conflicts with nothing in it. |
+| **Paraphrase drift** | The user's words get restated as a stronger or different claim, attributed to the user, and built into tasks | Quote the user in the ledger and in tasks; mark your interpretation as yours. |
+| **Reasoning instead of looking** | A plausible chain of reasoning ("the URDFs are mirrored, so...") replaces a direct observation, and the fix lands in the wrong layer | When the user reports a symptom, reproduce or observe it first (render it, sample it, screenshot it), then delegate the fix. |
+| **Unverified pass** | A check that cannot fail, or a pass recorded from an approximation | Ask how the check could fail. Confirm it fails on the old or broken input (for example, run the new test against the previous code). |
+
+**Requirement ledger.** Keep `$S/requirements.md`: one row per user request, with the user's verbatim words, the acceptance criteria you derived, the owning task, and the evidence **you** collected (screenshot path, recomputed number, command output). Add rows when the user adds or corrects a request. A row without your own evidence is not done, whatever Codex reports.
+
+## Decouple the work, then run Codex sessions in parallel
+
+Before writing any task, split the work by **write set**: the files, modules, output directories and runtime resources each part will change.
+
+- **Disjoint write sets** → one Codex session per part, launched in parallel. Each gets its own task file, log, session id and monitor. Don't queue them behind each other, and don't fold them into one session.
+- **Overlapping write sets** (for example, two features on the same page or pipeline) → one session, or run them one after another.
+
+Prefer splitting whenever it is possible; parallel sessions finish sooner, and a narrow task keeps Codex on track. To make work splittable, design for it when you write the tasks:
+
+- Put new logic in new modules with a narrow interface, so each task owns new files instead of editing shared ones.
+- When a shared file must change (a registry, a config schema, a web page, a backend), give it to **exactly one** session. Every other task lists it under "do not touch" and reads it only.
+- Fix the interfaces up front: function signatures, JSON schemas, file names and output paths. Write them into every task that produces or consumes them, so no session has to wait for another to decide them.
+- Give each session its own report directory and run directory.
+
+**New requests while Codex runs.** First compare the request's write set with the running session's:
+- It overlaps (the request changes code that session is editing) → stop and resume that session with a ruling (section 4), and merge everything pending into one ruling.
+- It does not overlap → launch a new parallel session. Don't interrupt a session for work it doesn't own.
+
+**Shared-tree hygiene.** Parallel sessions usually share one git working tree. State these rules in every task:
+- No `git stash`, `checkout`, `reset`, `clean` or tree-wide formatters, and no commits. They destroy or capture other sessions' edits.
+- Run targeted tests for your own files. The full suite may see another session's half-finished edits; the reviewer runs it after the sessions finish.
+- Repo-wide checks (lint, publication scans) may flag another session's files. Report those findings; don't fix files you don't own.
+- If the parts edit nearby code or each needs a clean full test run, give each session its own worktree instead: `git worktree add ../<repo>-<topic> -b codex/<topic>`, and launch Codex with `cd` into it. Merge after review.
+
+**Shared runtime resources** (a robot station, GPUs, ports, a running service, a remote run directory): assign each one to a single session, or give each session distinct devices (`CUDA_VISIBLE_DEVICES`), ports and run directories. Say in each task which resources it may use.
+
+**Bookkeeping.** Keep a short table in `$S/sessions.md` with topic, session id, PID, log, write set and status, and update it on every launch and exit. Run exactly one monitor per log, each with its own `WATCH_PID`.
+
+**Limits.** Every monitor event wakes you for a full turn, so the practical ceiling is about 2–4 parallel sessions. Codex sub-agents (below) split one task with shared context. Parallel sessions are for independent tasks.
+
+**Review and commit per session.** Review each session when it exits, on its own. Stage only that session's write set (`git add <paths>`), never `git add -A`. If a file shows edits from two sessions, read the diff before committing.
 
 ## 1. Write the task file
 
@@ -34,7 +83,8 @@ Put it in the session scratchpad, e.g. `$S/codex_<topic>_task.md`, and write it 
 - **Bug-fix budget:** Codex may fix bugs in its own implementation, up to 3 per step. Log each one with the evidence, the fix and the result. If it can't tell whether something is a bug or a real gate failure, it treats it as a gate failure and stops.
 - **Limit diagnostics on failure.** When a critical gate fails, render at most 3 relevant diagnostic images, then stop. Produce the full figure set only on success, because full renders after a failure waste a lot of time.
 - **Constraints:** output directory, protected paths, no git commit, no hardware IO, network rules. Keep large files on the remote node if the project says so.
-- **Deliverables:** a report with an "unauthorized choices I made" section, plus a reproducible script.
+- **Write set and "do not touch" list.** Name the files and directories this task owns, the files other running sessions own (read-only here), and the runtime resources it may use. Add the shared-tree rules from the section above when another session runs in the same tree.
+- **Deliverables:** a report with an "unauthorized choices I made" section listing **every default and user-facing choice** (what it is, alternatives, why), plus a reproducible script. Also ask for **verification handles**: the commands, URLs or files you will use to check the result yourself (for example a screenshot command for a UI, or the raw data behind each key number).
 - **End with paths.** The last message must list absolute paths of all images and key files, so they can be opened directly.
 
 ## 2. Launch
@@ -103,10 +153,13 @@ On each event, check for these failure patterns:
   - more than 3 fixes in one step;
   - stopping on a non-critical gate, or not stopping on a critical one.
 
-Routine progress gets one short line to the user. Don't send a push notification for it.
+Events are for **steering**, not narration. On a routine `CODEX_MSG`, check it against the brief and the ledger and say nothing to the user, unless it needs their decision, reveals a problem, or carries a result you have verified. When you do pass something on, say whether you checked it ("Codex reports X; not yet verified" versus "I checked X: ..."). Don't send push notifications for routine progress.
+
+Use the waiting time: while Codex works, prepare the acceptance checks you will run on exit, such as screenshot commands, the numbers to recompute and the old inputs that must fail.
 
 ## 4. Intervene
 
+0. **Check whether it belongs to this session.** If the change is new work outside this session's write set, launch a parallel session instead (see "Decouple the work") and leave this one running.
 1. **Stop Codex:** `kill <pid>` for the run you launched, or `pkill -f "^codex exec resume <SESSION_ID>"`. Never use a bare `pkill -f "^codex exec"`: other sessions may run their own Codex. The `^` anchor matters; an unanchored pattern also matches your own shell and kills it (exit 144).
 2. **Write a ruling** to `$S/<topic>_fix_N.md`:
    - Name the root cause. If it was your own task design, say so; that is usually the case.
@@ -140,8 +193,7 @@ codex exec fork <SESSION_ID> -m <MODEL> -c model_reasoning_effort=\"low\" \
 - **Verifying what Codex says.** Its answers explain things but are not evidence. Check numbers, file changes and test results against logs and files. Codex drifts, especially after compaction, and its self-report inherits the drift.
 - **Use read-only and `--ephemeral`.** A side question must never edit files or launch runs. Pass `--ephemeral` so the fork isn't saved as a session; drop it only when you want to keep a fork, for example a handoff you will resume.
 - **Watching a fork.** Get the PID with `pgrep -f "^codex exec fork <SID>"`. An unanchored pattern also matches your own wrapper shells, which exit quickly and make the watcher report `CODEX_EXITED` too early. Forking a session whose last tool call was still open logs many `Orphan custom tool call output` errors; they are harmless.
-- **Guard in read-only forks.** Under the Stop That Shit Guard, a read-only fork runs in review mode. Shell commands that aren't provably read-only are blocked, quoted `ssh` commands included. Check remote state yourself and give Codex the result, rather than expecting the fork to fetch it.
-- **Remote files for read-only forks.** Before forking, mount the remote run directory read-only on the local machine, so that Codex reads it with plain `cat`/`grep`/`ls`, which the Guard can prove read-only:
+- **Remote files for read-only forks.** Before forking, mount the remote run directory read-only on the local machine, so that Codex can read it with plain `cat`/`grep`/`ls` in a read-only sandbox:
 
   ```bash
   sshfs -o ro,reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,attr_timeout=5,entry_timeout=5,BatchMode=yes \
@@ -166,42 +218,32 @@ Codex can spawn sub-agents, which speeds up work that splits into independent pa
 - which parts may run in parallel;
 - which output paths each sub-agent owns. Leave edits to shared code to the main agent.
 
-Keep the task to the main agent when every step edits the same code.
+Keep the task to the main agent when every step edits the same code. For separate tasks rather than parts of one task, use parallel sessions instead (see "Decouple the work").
 
 The watcher follows the main agent. Its messages and its final report carry the sub-agents' results, and idle alerts while it waits on sub-agents are expected. Each sub-agent writes its own session file under `~/.codex/sessions/`, which you can read when you need detail.
 
-## With the Stop That Shit plugin
+## 5. Acceptance review on exit (you, not Codex)
 
-If the Codex installation uses the Stop That Shit Guard, every task file starts with a directive line that sets the mode, the files it may touch, the dependency policy and the sub-agent budget.
+Codex's report tells you where to look; it is not the evidence. Before you tell the user a task is done, commit it or deploy it:
 
-**Review-only tasks.** In `review` mode the Guard blocks every file write (`MODE_FORBIDS_MUTATION`) and every shell command it cannot prove read-only (`MUTABILITY_UNPROVEN`), including the report file and test runs. To let Codex write its report, whitelist that one file:
+1. **Read** `$S/codex_<topic>_last.md`, the report, and its list of choices and defaults. Check every default against the ledger.
+2. **Inspect the artifact as the user will meet it.** Match the check to the kind of artifact:
 
-- Put this directive on the **first line** of a review task file, outside quotes and code blocks:
+   | Artifact | Your own check |
+   |---|---|
+   | UI or web page | Load it in a real browser at the user's viewport sizes, screenshot it and look: everything requested visible, nothing overflowing, defaults right. Interact with the new controls. |
+   | Images, renders, drawings | Open the key images yourself. Check orientation, frame of reference, labels, and that the figure shows what the claim says. |
+   | CAD or geometry | Render in the frame the user works in (for example world or table-up), measure the key dimensions, and look for features nobody asked for. |
+   | Numbers and metrics | Recompute one or two key numbers independently from raw outputs, and confirm the denominator and units. |
+   | Code and tests | Read the diff of the risky parts. Run the tests yourself. Confirm a new test fails on the old code. |
+   | Deployment or live service | Check the deployed state directly: version or hash, service status, and the live page or output, not just "restart succeeded". |
+   | Research | Open two or three key citations at the source and confirm the quoted numbers. |
 
-  ```text
-  $stop-that-shit lock change files=<relative/path/to/REVIEW.md> -- Review only; write the report to this one file.
-  ```
+3. **Check scope:** `git status` shows no protected or out-of-scope files changed, and no large or private files landed in the repo.
+4. **Update the ledger** with your evidence. Anything you could not check yourself is reported as **unverified**, with the reason.
+5. **Report** to the user in their language, separating what you verified from what you have only Codex's word for, with absolute paths to the evidence.
 
-  Use the exact relative path. Separate several paths with `|`. Don't use globs.
-- Still say in the task body that source, tests and docs must not be modified. The lock enforces this.
-- Under a narrow `files=` lock, shell commands that can't be proven read-only still need approval, which `codex exec` cannot grant. Expect test runs to be blocked. Run the regression yourself and give Codex the results, marked "reviewer-verified".
-- If the report still can't be written, take the findings from `$S/codex_<topic>_last.md`.
-
-**Execution tasks.** Set the fields the task needs on the directive line:
-
-```text
-$stop-that-shit change agents=<N> deps=allow -- <task>
-```
-
-- `agents=N` is the sub-agent budget; use `agents=0` to keep the task to the main agent.
-- The Guard defaults to `deps=ask` and blocks any `pip install` with `DEPENDENCY_NOT_AUTHORIZED`. Use `deps=allow` only when the task actually installs packages, and state in the body which environments it may install into.
-
-## 5. Review on exit
-
-- Read `$S/codex_<topic>_last.md` and the report.
-- Spot-check the key numbers and images yourself. Look for false passes, for example a numerical failure silently recorded as 0.
-- Check `git status` to confirm no protected files changed.
-- Report to the user in their language, with the absolute paths of the images and files.
+If your check fails, don't relay the failure as Codex's news. Own it: say what you found, then resume Codex with a ruling, or fix it yourself.
 
 ## Cost notes
 

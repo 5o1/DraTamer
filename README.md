@@ -16,12 +16,13 @@ Watching it turn by turn is expensive, though. DraTamer keeps the human out of t
 
 ## How it works
 
+0. **Decouple.** Claude splits the work by write set (the files, output directories and runtime resources each part changes). Parts with disjoint write sets run as parallel Codex sessions, each with its own task, log and monitor. Parts that edit the same code stay in one session. A new request that doesn't touch a running session's files starts a new session instead of interrupting it.
 1. **Brief.** Claude writes a task file with:
    - verified context;
    - a precise method;
    - critical gates, which stop the run, and non-critical gates, which are recorded and the run continues;
    - a bounded self-fix budget;
-   - the files Codex may touch;
+   - the files Codex may touch, and the files other running sessions own;
    - the required deliverables.
 2. **Launch.** `codex exec` runs in the background with an explicit model, sandbox and network setting.
 3. **Watch.** `scripts/codex_watch.sh` tails the Codex log under Claude Code's Monitor tool. Each output line is an event that wakes Claude:
@@ -39,8 +40,8 @@ Watching it turn by turn is expensive, though. DraTamer keeps the human out of t
    Each known failure has its own hook, so a real failure does not wait for the idle check. Throttled alerts share a cooldown (`WATCH_COOLDOWN`, default 30 s): at most one wakes Claude per cooldown. The rest are summarised in a single `ALERT_SUPPRESSED` line.
 
    Brief network trouble needs no action, because Codex reconnects on its own. API reconnects, websocket/TLS errors and an unreachable backend open a silent tolerance period that closes as soon as the backend answers again. Only trouble lasting longer than `WATCH_OUTAGE` seconds (default 300) wakes Claude.
-4. **Intervene.** Claude stops Codex, writes a ruling (root cause, corrected method, what stays unchanged), and resumes the same Codex session.
-5. **Review.** Claude reads the report, spot-checks the key numbers and citations, checks `git status`, and reports to the user.
+4. **Intervene.** For a change inside the session's own scope, Claude stops Codex, writes a ruling (root cause, corrected method, what stays unchanged), and resumes the same Codex session. Separate new work goes to a parallel session.
+5. **Accept.** Claude, as the lead, verifies the result itself before reporting or shipping. It looks at the UI, images or files the way the user will, recomputes key numbers, runs the tests, and checks every default Codex chose against the user's words. A requirement ledger records each request with Claude's own evidence. The report to the user separates what Claude verified from what it has only Codex's word for. Routine Codex messages are for steering and are not relayed as progress.
 
 The full procedure is in [`skills/dratamer/SKILL.md`](skills/dratamer/SKILL.md).
 
