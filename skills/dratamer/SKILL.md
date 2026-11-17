@@ -69,7 +69,7 @@ Prefer splitting whenever it is possible; parallel sessions finish sooner, and a
 
 1. **Before launching:** create the session's own branch and worktree, `git worktree add ../<repo>-wt/<topic> -b task/<topic> main`, and launch Codex with `cd` into it.
    - If the project isn't a git repo yet, `git init` it first and commit a baseline on main.
-   - Track code and text only. Keep large generated or input directories out of git (`.gitignore`), and symlink them into each worktree from the main tree.
+   - Track code and text only. Keep large generated or input directories out of git (`.gitignore`), and symlink them into each worktree from the main tree. Write those ignore patterns without a trailing slash (`/build`, not `/build/`): a symlink is not a directory to git, so `/build/` leaves it untracked and `git worktree remove` refuses to delete the worktree.
 2. **During the session:** Codex edits and commits only on its own branch, inside its worktree.
    - Commit messages carry the session's attribution lines.
    - No `git stash`, `checkout`, `reset`, `clean` or tree-wide formatters in any worktree.
