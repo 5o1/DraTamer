@@ -65,11 +65,25 @@ Prefer splitting whenever it is possible; parallel sessions finish sooner, and a
 - It overlaps (the request changes code that session is editing) → stop and resume that session with a ruling (section 4), and merge everything pending into one ruling.
 - It does not overlap → launch a new parallel session. Don't interrupt a session for work it doesn't own.
 
-**Shared-tree hygiene.** Parallel sessions usually share one git working tree. State these rules in every task:
-- No `git stash`, `checkout`, `reset`, `clean` or tree-wide formatters, and no commits. They destroy or capture other sessions' edits.
-- Run targeted tests for your own files. The full suite may see another session's half-finished edits; the reviewer runs it after the sessions finish.
-- Repo-wide checks (lint, publication scans) may flag another session's files. Report those findings; don't fix files you don't own.
-- If the parts edit nearby code or each needs a clean full test run, give each session its own worktree instead: `git worktree add ../<repo>-<topic> -b codex/<topic>`, and launch Codex with `cd` into it. Merge after review.
+**One branch and one worktree per parallel session (default).** Parallel sessions never share a working tree; one session overwriting another's files is a real failure seen in practice.
+
+1. **Before launching:** create the session's own branch and worktree, `git worktree add ../<repo>-wt/<topic> -b task/<topic> main`, and launch Codex with `cd` into it.
+   - If the project isn't a git repo yet, `git init` it first and commit a baseline on main.
+   - Track code and text only. Keep large generated or input directories out of git (`.gitignore`), and symlink them into each worktree from the main tree.
+2. **During the session:** Codex edits and commits only on its own branch, inside its worktree.
+   - Commit messages carry the session's attribution lines.
+   - No `git stash`, `checkout`, `reset`, `clean` or tree-wide formatters in any worktree.
+3. **When it finishes:**
+   - Review it (section 5) inside its worktree.
+   - Merge the branch into main with `git merge --no-ff`, then delete the worktree directory (`git worktree remove`) and the branch.
+   - An abandoned session's worktree and branch are removed too. Don't leave stale worktrees behind.
+   - A small helper script (`new` / `merge` / `drop`) keeps this uniform.
+4. **What worktrees don't isolate:**
+   - Symlinked artifact directories, remote run directories and services are still shared.
+   - Sessions that write the same shared artifact (for example a timeline file, a final render, or a remote code sync) must run one after another, or get distinct output paths in their tasks. See shared runtime resources below.
+5. **Tests and checks:** each session runs targeted tests in its own worktree. The reviewer runs the full suite on main after merging. Repo-wide checks that flag another session's files are reported, not fixed.
+
+Only a single session working alone may use the main tree directly.
 
 **Shared runtime resources** (a robot station, GPUs, ports, a running service, a remote run directory): assign each one to a single session, or give each session distinct devices (`CUDA_VISIBLE_DEVICES`), ports and run directories. Say in each task which resources it may use.
 
@@ -77,7 +91,10 @@ Prefer splitting whenever it is possible; parallel sessions finish sooner, and a
 
 **Limits.** Every monitor event wakes you for a full turn, so the practical ceiling is about 2–4 parallel sessions. Codex sub-agents (below) split one task with shared context. Parallel sessions are for independent tasks.
 
-**Review and commit per session.** Review each session when it exits, on its own. Stage only that session's write set (`git add <paths>`), never `git add -A`. If a file shows edits from two sessions, read the diff before committing.
+**Review and merge per session.** Review each session when it exits, on its own, in its worktree.
+- Check that its branch changes only its write set: `git diff main...task/<topic> --stat`.
+- Merge into main, then remove the worktree and the branch.
+- If two branches touched the same file, read the merge diff before resolving the conflict.
 
 ## 1. Write the task file
 
@@ -93,7 +110,7 @@ Put it in the session scratchpad, e.g. `$S/codex_<topic>_task.md`, and write it 
 - **Bug-fix budget:** Codex may fix bugs in its own implementation, up to 3 per step. Log each one with the evidence, the fix and the result. If it can't tell whether something is a bug or a real gate failure, it treats it as a gate failure and stops.
 - **Limit diagnostics on failure.** When a critical gate fails, render at most 3 relevant diagnostic images, then stop. Produce the full figure set only on success, because full renders after a failure waste a lot of time.
 - **Constraints:** output directory, protected paths, no git commit, no hardware IO, network rules. Keep large files on the remote node if the project says so.
-- **Write set and "do not touch" list.** Name the files and directories this task owns, the files other running sessions own (read-only here), and the runtime resources it may use. Add the shared-tree rules from the section above when another session runs in the same tree.
+- **Write set and "do not touch" list.** Name the files and directories this task owns, the files other running sessions own (read-only here), and the runtime resources it may use. When other sessions run in parallel, name this session's branch and worktree path, tell it to commit only there, and list the shared artifacts it must not write.
 - **Deliverables:** a report with an "unauthorized choices I made" section listing **every default and user-facing choice** (what it is, alternatives, why), plus a reproducible script. Also ask for **verification handles**: the commands, URLs or files you will use to check the result yourself (for example a screenshot command for a UI, or the raw data behind each key number).
 - **End with paths.** The last message must list absolute paths of all images and key files, so they can be opened directly.
 
