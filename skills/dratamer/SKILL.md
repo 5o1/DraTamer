@@ -180,7 +180,7 @@ On each event, check for these failure patterns:
   - more than 3 fixes in one step;
   - stopping on a non-critical gate, or not stopping on a critical one.
 
-Events are for **steering**, not narration. On a routine `CODEX_MSG`, check it against the brief and the ledger and say nothing to the user, unless it needs their decision, reveals a problem, or carries a result you have verified. When you do pass something on, say whether you checked it ("Codex reports X; not yet verified" versus "I checked X: ..."). Don't send push notifications for routine progress.
+Events are for **steering**, not narration. On a routine `CODEX_MSG`, check it against the brief and the ledger and say nothing to the user, unless it needs their decision, reveals a problem, or carries a result you have verified. When you do pass something on, state what you checked ("I checked X: ..."). For anything you have not checked yet, don't attach a passive label such as "not yet verified": later turns, and new contexts that inherit this one, tend to ignore it. Write the check as your own next action, in the first person, naming the artifact and what to look for: "Next turn I should open `<path>` and check that ...". Don't send push notifications for routine progress.
 
 Use the waiting time: while Codex works, prepare the acceptance checks you will run on exit, such as screenshot commands, the numbers to recompute and the old inputs that must fail.
 
@@ -269,8 +269,8 @@ Codex's report tells you where to look; it is not the evidence. Before you tell 
    | Research | Open two or three key citations at the source and confirm the quoted numbers. |
 
 3. **Check scope:** `git status` shows no protected or out-of-scope files changed, and no large or private files landed in the repo.
-4. **Update the ledger** with your evidence. Anything you could not check yourself is reported as **unverified**, with the reason.
-5. **Report** to the user in their language, separating what you verified from what you have only Codex's word for, with absolute paths to the evidence.
+4. **Update the ledger** with your evidence. For anything you could not check yet, write the check as your own first-person next action ("Next turn I should open `<path>` and check ..."), with the reason it is still open. Not a passive "unverified" label.
+5. **Report** to the user in their language. Give what you verified, with absolute paths to the evidence, then the checks still open, each phrased as your own next action ("Next turn I should ...", or in the user's language, e.g. "接下来我该…").
 
 If your check fails, don't relay the failure as Codex's news. Own it: say what you found, then resume Codex with a ruling, or fix it yourself.
 
